@@ -15,6 +15,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,29 +45,31 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            showCalendarNotification(this)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
+
         // Handle notification permission and trigger date notification
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
-            } else {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
                 showCalendarNotification(this)
+            } else {
+                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         } else {
             showCalendarNotification(this)
         }
 
         setContent { App() }
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 101 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            showCalendarNotification(this)
-        }
     }
 
     private fun showCalendarNotification(context: Context) {
@@ -82,7 +85,6 @@ class MainActivity : ComponentActivity() {
             notificationManager.createNotificationChannel(channel)
         }
 
-        // Calculate today's Jalali date for the notification text
         val todayJalali = Jalali.fromGregorian(LocalDate.now())
         val monthsDari = Jalali.dari
         val dateString = "${Jalali.digits(todayJalali.d)} ${monthsDari[todayJalali.m - 1]} ${Jalali.digits(todayJalali.y)}"
@@ -127,7 +129,7 @@ fun CalendarScreen() {
     val prefs = remember { ctx.getSharedPreferences("p", Context.MODE_PRIVATE) }
     var ps by remember { mutableStateOf(prefs.getBoolean("ps", false)) }
     var showWidgetPopup by remember { mutableStateOf(false) }
-    
+
     val today = remember { LocalDate.now() }
     val tj = remember { Jalali.fromGregorian(today) }
     val base = 1300
@@ -145,12 +147,12 @@ fun CalendarScreen() {
     if (showWidgetPopup) {
         AlertDialog(
             onDismissRequest = { showWidgetPopup = false },
-            title = { Text(if (ps) "د ویجت اضافه کول" | "افزودن ویجت به صفحه اصلی") },
+            title = { Text(if (ps) "د ویجت اضافه کول" else "افزودن ویجت به صفحه اصلی") },
             text = {
                 Text(
-                    if (ps) 
+                    if (ps)
                         "د ویجت اضافه کولو لپاره، خپله سکرین (Home Screen) کېږده او ونیسئ، بیا 'Widgets' یا 'ویجتونه' انتخاب کړئ او افغان تقویم راکش کړئ."
-                    else 
+                    else
                         "برای افزودن ویجت، صفحه اصلی گوشی خود را چند لحظه نگه دارید (Long Press)، گزینه 'Widgets' را انتخاب کرده و ویجت تقویم افغان را به صفحه بکشید."
                 )
             },
@@ -167,12 +169,12 @@ fun CalendarScreen() {
                         }
                     }
                 }) {
-                    Text(if (ps) "خودکار پین کول" | "تلاش برای پین خودکار")
+                    Text(if (ps) "خودکار پین کول" else "تلاش برای پین خودکار")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showWidgetPopup = false }) {
-                    Text(if (ps) "تړل" | "بستن")
+                    Text(if (ps) "تړل" else "بستن")
                 }
             }
         )
@@ -198,8 +200,8 @@ fun CalendarScreen() {
                     scope.launch { pager.animateScrollToPage((tj.y - base) * 12 + tj.m - 1) }
                 }) { Text(if (ps) "نن" else "امروز") }
 
-                TextButton(onClick = { showWidgetPopup = true }) { 
-                    Text(if (ps) "ویجت" else "افزودن ویجت") 
+                TextButton(onClick = { showWidgetPopup = true }) {
+                    Text(if (ps) "ویجت" else "افزودن ویجت")
                 }
             }
             TextButton(onClick = {
