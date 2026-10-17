@@ -1,0 +1,175 @@
+package af.calendar
+
+import android.content.Context
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent { App() }
+    }
+}
+
+@Composable
+fun App() {
+    val ctx = LocalContext.current
+    val dark = isSystemInDarkTheme()
+    val scheme = when {
+        Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+        dark -> darkColorScheme()
+        else -> lightColorScheme()
+    }
+    MaterialTheme(colorScheme = scheme) {
+        Surface(Modifier.fillMaxSize()) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { CalendarScreen() }
+        }
+    }
+}
+
+@Composable
+fun CalendarScreen() {
+    val ctx = LocalContext.current
+    val prefs = remember { ctx.getSharedPreferences("p", Context.MODE_PRIVATE) }
+    var ps by remember { mutableStateOf(prefs.getBoolean("ps", false)) }
+    val today = remember { LocalDate.now() }
+    val tj = remember { Jalali.fromGregorian(today) }
+    val base = 1300
+    val pager = rememberPagerState(initialPage = (tj.y - base) * 12 + tj.m - 1) { 300 * 12 }
+    val scope = rememberCoroutineScope()
+    var sel by remember { mutableStateOf(today) }
+
+    val y = base + pager.currentPage / 12
+    val m = pager.currentPage % 12 + 1
+    val months = if (ps) Jalali.pashto else Jalali.dari
+    val shortWeek = if (ps) Jalali.shortPashto else Jalali.shortDari
+    val fullWeek = if (ps) Jalali.weekPashto else Jalali.weekDari
+
+    Column(Modifier.statusBarsPadding().navigationBarsPadding().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { scope.launch { pager.animateScrollToPage(pager.currentPage - 1) } }) {
+                Text("›", fontSize = 30.sp)
+            }
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("${months[m - 1]} ${Jalali.digits(y)}", fontSize = 24.sp, fontWeight = FontWeight.Medium)
+                Text("${Jalali.latin[m - 1]} $y", fontSize = 12.sp, modifier = Modifier.alpha(0.6f))
+            }
+            IconButton(onClick = { scope.launch { pager.animateScrollToPage(pager.currentPage + 1) } }) {
+                Text("‹", fontSize = 30.sp)
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(onClick = {
+                sel = today
+                scope.launch { pager.animateScrollToPage((tj.y - base) * 12 + tj.m - 1) }
+            }) { Text(if (ps) "نن" else "امروز") }
+            TextButton(onClick = {
+                ps = !ps
+                prefs.edit().putBoolean("ps", ps).apply()
+                CalWidget.updateAll(ctx)
+            }) { Text(if (ps) "دری" else "پښتو") }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth()) {
+            for (c in 0..6) Text(
+                shortWeek[c], Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 14.sp,
+                color = if (c == 6) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth()) { p ->
+            MonthGrid(base + p / 12, p % 12 + 1, today, sel, ps) { sel = it }
+        }
+        Spacer(Modifier.height(16.dp))
+        val sj = Jalali.fromGregorian(sel)
+        val hol = Holidays.of(sel, ps)
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp)) {
+                Text(
+                    "${fullWeek[Jalali.weekIndex(sel)]}، ${Jalali.digits(sj.d)} ${months[sj.m - 1]} ${Jalali.digits(sj.y)}",
+                    fontSize = 18.sp, fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(sel.format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", Locale.ENGLISH)), fontSize = 13.sp)
+                Text(Jalali.hijriText(sel), fontSize = 13.sp)
+                if (hol != null) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(hol, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MonthGrid(y: Int, m: Int, today: LocalDate, sel: LocalDate, ps: Boolean, onSel: (LocalDate) -> Unit) {
+    val first = remember(y, m) { Jalali.toGregorian(y, m, 1) }
+    val len = remember(y, m) { Jalali.monthLength(y, m) }
+    val offset = Jalali.weekIndex(first)
+    val rows = (offset + len + 6) / 7
+    val shape = RoundedCornerShape(14.dp)
+    Column {
+        for (r in 0 until rows) Row(Modifier.fillMaxWidth()) {
+            for (c in 0 until 7) {
+                val d = r * 7 + c - offset + 1
+                Box(Modifier.weight(1f).aspectRatio(0.85f).padding(2.dp), contentAlignment = Alignment.Center) {
+                    if (d in 1..len) {
+                        val date = first.plusDays((d - 1).toLong())
+                        val special = date.dayOfWeek == DayOfWeek.FRIDAY || Holidays.of(date, ps) != null
+                        val border = when (date) {
+                            sel -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                            today -> BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary)
+                            else -> null
+                        }
+                        var mod = Modifier.fillMaxSize().clip(shape).clickable { onSel(date) }
+                        if (border != null) mod = mod.border(border, shape)
+                        Column(
+                            mod,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                Jalali.digits(d), fontSize = 18.sp,
+                                fontWeight = if (date == today) FontWeight.Bold else FontWeight.Normal,
+                                color = if (special) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(date.dayOfMonth.toString(), fontSize = 10.sp, modifier = Modifier.alpha(0.5f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
