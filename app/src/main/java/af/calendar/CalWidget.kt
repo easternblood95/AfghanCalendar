@@ -21,7 +21,7 @@ class CalWidget : AppWidgetProvider() {
     override fun onReceive(c: Context, i: Intent) {
         super.onReceive(c, i)
         when (i.action) {
-            Intent.ACTION_DATE_CHANGED, Intent.ACTION_TIME_SET, Intent.ACTION_TIMEZONE_CHANGED -> updateAll(c)
+            Intent.ACTION_DATE_CHANGED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED -> updateAll(c)
         }
     }
 
