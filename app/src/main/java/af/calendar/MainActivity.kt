@@ -1,6 +1,12 @@
 package af.calendar
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -27,6 +33,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -37,7 +44,41 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        
+        // Trigger welcome notification on startup
+        showCalendarNotification(this)
+
         setContent { App() }
+    }
+
+    private fun showCalendarNotification(context: Context) {
+        val channelId = "calendar_channel"
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "Afghan Calendar Reminders",
+                NotificationManager.IMPORTANCE_DEFAULT
+            )
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val intent = Intent(context, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            context, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.ic_menu_my_calendar)
+            .setContentTitle("Afghan Calendar")
+            .setContentText("Welcome! Check your home screen widget for today's date.")
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+
+        notificationManager.notify(1, notification)
     }
 }
 
@@ -89,10 +130,22 @@ fun CalendarScreen() {
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onClick = {
-                sel = today
-                scope.launch { pager.animateScrollToPage((tj.y - base) * 12 + tj.m - 1) }
-            }) { Text(if (ps) "نن" else "امروز") }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = {
+                    sel = today
+                    scope.launch { pager.animateScrollToPage((tj.y - base) * 12 + tj.m - 1) }
+                }) { Text(if (ps) "نن" else "امروز") }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    TextButton(onClick = {
+                        val appWidgetManager = AppWidgetManager.getInstance(ctx)
+                        val myProvider = ComponentName(ctx, CalWidget::class.java)
+                        if (appWidgetManager.isRequestPinAppWidgetSupported) {
+                            appWidgetManager.requestPinAppWidget(myProvider, null, null)
+                        }
+                    }) { Text(if (ps) "ویجت" else "افزودن ویجت") }
+                }
+            }
             TextButton(onClick = {
                 ps = !ps
                 prefs.edit().putBoolean("ps", ps).apply()
