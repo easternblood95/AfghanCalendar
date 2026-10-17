@@ -1,5 +1,6 @@
 package af.calendar
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -7,8 +8,10 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -45,10 +48,25 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        // Trigger welcome notification on startup
-        showCalendarNotification(this)
+        // Handle notification permission and trigger date notification
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+            } else {
+                showCalendarNotification(this)
+            }
+        } else {
+            showCalendarNotification(this)
+        }
 
         setContent { App() }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 101 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            showCalendarNotification(this)
+        }
     }
 
     private fun showCalendarNotification(context: Context) {
@@ -64,6 +82,11 @@ class MainActivity : ComponentActivity() {
             notificationManager.createNotificationChannel(channel)
         }
 
+        // Calculate today's Jalali date for the notification text
+        val todayJalali = Jalali.fromGregorian(LocalDate.now())
+        val monthsDari = Jalali.dari
+        val dateString = "${Jalali.digits(todayJalali.d)} ${monthsDari[todayJalali.m - 1]} ${Jalali.digits(todayJalali.y)}"
+
         val intent = Intent(context, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             context, 0, intent,
@@ -72,8 +95,8 @@ class MainActivity : ComponentActivity() {
 
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_menu_my_calendar)
-            .setContentTitle("Afghan Calendar")
-            .setContentText("Welcome! Check your home screen widget for today's date.")
+            .setContentTitle("امروز / Today")
+            .setContentText(dateString)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .build()
@@ -103,6 +126,8 @@ fun CalendarScreen() {
     val ctx = LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("p", Context.MODE_PRIVATE) }
     var ps by remember { mutableStateOf(prefs.getBoolean("ps", false)) }
+    var showWidgetPopup by remember { mutableStateOf(false) }
+    
     val today = remember { LocalDate.now() }
     val tj = remember { Jalali.fromGregorian(today) }
     val base = 1300
@@ -115,6 +140,43 @@ fun CalendarScreen() {
     val months = if (ps) Jalali.pashto else Jalali.dari
     val shortWeek = if (ps) Jalali.shortPashto else Jalali.shortDari
     val fullWeek = if (ps) Jalali.weekPashto else Jalali.weekDari
+
+    // Widget Recommendation Dialog Popup
+    if (showWidgetPopup) {
+        AlertDialog(
+            onDismissRequest = { showWidgetPopup = false },
+            title = { Text(if (ps) "د ویجت اضافه کول" | "افزودن ویجت به صفحه اصلی") },
+            text = {
+                Text(
+                    if (ps) 
+                        "د ویجت اضافه کولو لپاره، خپله سکرین (Home Screen) کېږده او ونیسئ، بیا 'Widgets' یا 'ویجتونه' انتخاب کړئ او افغان تقویم راکش کړئ."
+                    else 
+                        "برای افزودن ویجت، صفحه اصلی گوشی خود را چند لحظه نگه دارید (Long Press)، گزینه 'Widgets' را انتخاب کرده و ویجت تقویم افغان را به صفحه بکشید."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showWidgetPopup = false
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val appWidgetManager = AppWidgetManager.getInstance(ctx)
+                        val myProvider = ComponentName(ctx, CalWidget::class.java)
+                        if (appWidgetManager.isRequestPinAppWidgetSupported) {
+                            appWidgetManager.requestPinAppWidget(myProvider, null, null)
+                        } else {
+                            Toast.makeText(ctx, if (ps) "ستاسو لانچر پین ملاتړ نه کوي" else "لانچر شما از پین خودکار پشتیبانی نمی‌کند", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }) {
+                    Text(if (ps) "خودکار پین کول" | "تلاش برای پین خودکار")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWidgetPopup = false }) {
+                    Text(if (ps) "تړل" | "بستن")
+                }
+            }
+        )
+    }
 
     Column(Modifier.statusBarsPadding().navigationBarsPadding().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -136,14 +198,8 @@ fun CalendarScreen() {
                     scope.launch { pager.animateScrollToPage((tj.y - base) * 12 + tj.m - 1) }
                 }) { Text(if (ps) "نن" else "امروز") }
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    TextButton(onClick = {
-                        val appWidgetManager = AppWidgetManager.getInstance(ctx)
-                        val myProvider = ComponentName(ctx, CalWidget::class.java)
-                        if (appWidgetManager.isRequestPinAppWidgetSupported) {
-                            appWidgetManager.requestPinAppWidget(myProvider, null, null)
-                        }
-                    }) { Text(if (ps) "ویجت" else "افزودن ویجت") }
+                TextButton(onClick = { showWidgetPopup = true }) { 
+                    Text(if (ps) "ویجت" else "افزودن ویجت") 
                 }
             }
             TextButton(onClick = {
